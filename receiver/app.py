@@ -5,6 +5,10 @@ from Crypto.Cipher import PKCS1_OAEP
 import hashlib, binascii
 import base64
 from argparse import ArgumentParser
+import os
+import uuid 
+
+base_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)),"keytemp")
 
 def create_app(hpwd_hex):
     app = Flask(__name__)
@@ -31,31 +35,59 @@ else:
     print("WARNING: THIS PRIVATE KEY IS NOT PASSWORD PROTECTED")
 
 app = create_app(hpwd_hex)
-# @app.route('/')
-# def hello_world():
-#     return 'Hello, World!'
 
 @app.route('/pk',methods=["get"])
 def get_pk():
-    with open("public.pub","rb") as f:
-        ktext = f.read()
-    return base64.b64encode(ktext)
+    ey = RSA.generate(2048)
+    hpwd = app.config.get("hpwd")
+    key = RSA.generate(2048)
+    if hpwd:
+        exported_pem_key = key.export_key("PEM", passphrase=hpwd, pkcs=8)
+    elif pwd and not salt:
+        raise Exception("If you include a password, you must include a salt.")
+    elif salt and not pwd:
+        raise Exception("If you include a salt, you must include a password")
+    else:
+        print("WARNING: THIS PRIVATE KEY IS NOT PASSWORD PROTECTED")
+        exported_pem_key = key.export_key("PEM")
+
+    uid = str(uuid.uuid4())
+
+    with open(os.path.join(base_dir, "private_{}.pem".format(str(uid))),"wb") as f:
+        f.write(exported_pem_key)
+
+    pub_key = key.publickey()
+
+    ktext = pub_key.export_key("PEM")
+    b64ktext = base64.b64encode(ktext)
+
+    return jsonify({
+        "id":uid,
+        "key":b64ktext,
+    })
 
 @app.route('/send',methods=["post"])
 def dec_post():
     b64_req_data = request.json["data"]
+    uid = request.json["id"]
     req_data = base64.b64decode(b64_req_data)
-    with open("private.pem","rb") as f:
+    key_file = os.path.join(base_dir, "private_{}.pem".format(str(uid)))
+    with open(key_file,"rb") as f:
         if app.config["hpwd"]:
             import_pass_key = RSA.import_key(f.read(), passphrase=app.config["hpwd"])
         else:
             print("WARNING: THIS PRIVATE KEY IS NOT PASSWORD PROTECTED")
             import_pass_key = RSA.import_key(f.read())
-    print dir(Cipher)
+    os.remove(key_file)
     key_cipher = PKCS1_OAEP.new(import_pass_key)
-    dec_req_data = key_cipher.decrypt(req_data)
-    print(dec_req_data)
-    return 'Done'
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+    # clear text data contains the decrypted data posted  # 
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+    clear_text_data = key_cipher.decrypt(req_data)
+
+    return jsonify({'status':'done'})
 
 
 app.run()
