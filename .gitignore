@@ -1,0 +1,6 @@
+*.pub
+*.pem
+*.pyc
+testing/
+*vscode*
+venv/
